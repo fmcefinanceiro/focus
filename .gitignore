@@ -1,0 +1,23 @@
+# pasta de dados (dados sensíveis)
+data/
+
+# arquivos de dados
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.docx
+*.doc
+*.pptx
+*.zip
+
+# ambiente virtual
+venv/
+
+# python
+__pycache__/
+*.pyc
+
+# sistema
+.DS_Store
+Thumbs.db

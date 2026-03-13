@@ -1,0 +1,7 @@
+pandas
+plotly
+requests
+streamlit
+zipfile
+io
+Path
