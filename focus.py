@@ -1,11 +1,13 @@
 import os
+import io
+import zipfile
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import zipfile
-import io
-from pathlib import Path
+
 
 # =========================================================
 # 1) CONFIGURAÇÕES GERAIS DO PROJETO
@@ -30,13 +32,9 @@ CONFIG = {
     },
 
     "arquivo": {
-        "caminho_base": "data/Base Geral.xlsx",
         "sheet_name": 0
     },
 
-    # -----------------------------------------------------
-    # Mapeamento das colunas ORIGINAIS -> PADRÃO INTERNO
-    # -----------------------------------------------------
     "colunas": {
         "data": "Dt. Pagamento",
         "grupo": "Grupo",
@@ -45,9 +43,6 @@ CONFIG = {
         "unidade": "Unidade"
     },
 
-    # -----------------------------------------------------
-    # Mapeamento dos grupos para padrão interno
-    # -----------------------------------------------------
     "mapa_grupos": {
         "3.1.1.01 RECEITAS DE PRESTAÇÃO DE SERVIÇO": "Receita Bruta",
         "3.1.1.02 RECEITA DE CURSOS": "Receita Bruta",
@@ -63,9 +58,6 @@ CONFIG = {
         "7.1.1.01 INVESTIMENTOS EM ESTRUTURA CLÍNICA": "Investimentos"
     },
 
-    # -----------------------------------------------------
-    # Quais grupos devem ficar negativos
-    # -----------------------------------------------------
     "grupos_negativos": [
         "Deduções",
         "Custos Variáveis",
@@ -74,9 +66,6 @@ CONFIG = {
         "Investimentos"
     ],
 
-    # -----------------------------------------------------
-    # Estrutura da DRE
-    # -----------------------------------------------------
     "estrutura_dre": [
         {"nome": "Receita Bruta", "tipo": "grupo", "origem": "Receita Bruta"},
         {"nome": "(-) Deduções", "tipo": "grupo", "origem": "Deduções"},
@@ -91,10 +80,12 @@ CONFIG = {
     ],
 
     "linha_receita_base_av": "Receita Bruta",
+
     "downloads": {
-    "arquivo_zip": "data/Focus - Arquivos entregues.zip"
-},
+        "arquivo_zip": "data/Focus - Arquivos entregues.zip"
+    },
 }
+
 
 # =========================================================
 # 2) CONFIG STREAMLIT
@@ -125,6 +116,15 @@ st.markdown(
 )
 
 menu = st.sidebar.radio("Navegação", CONFIG["app"]["menu"])
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📂 Carregar base")
+
+arquivo_upload = st.sidebar.file_uploader(
+    "Envie a base financeira (.xlsx)",
+    type=["xlsx"]
+)
+
 
 # =========================================================
 # 3) FUNÇÕES AUXILIARES
@@ -170,6 +170,7 @@ def gerar_rotulo_mes(data_series):
     }
     return data_series.dt.month.map(meses_pt) + "/" + data_series.dt.year.astype(str)
 
+
 def listar_arquivos_para_download(pasta_base):
     pasta = Path(pasta_base)
 
@@ -192,7 +193,8 @@ def obter_mime_type(caminho_arquivo):
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".doc": "application/msword",
         ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        ".txt": "text/plain"
+        ".txt": "text/plain",
+        ".zip": "application/zip"
     }
 
     return mapa.get(ext, "application/octet-stream")
@@ -216,11 +218,11 @@ def criar_zip_da_pasta(pasta_base):
 # 4) LEITURA E PADRONIZAÇÃO DA BASE
 # =========================================================
 @st.cache_data
-def carregar_base(config):
-    df = pd.read_excel(
-        config["arquivo"]["caminho_base"],
-        sheet_name=config["arquivo"]["sheet_name"]
-    )
+def carregar_base(arquivo, sheet_name=0):
+    if arquivo is None:
+        return None
+
+    df = pd.read_excel(arquivo, sheet_name=sheet_name)
     return df
 
 
@@ -253,22 +255,17 @@ def padronizar_colunas(df, config):
 def padronizar_dados(df, config):
     df = df.copy()
 
-    # datas
     df["data"] = pd.to_datetime(df["data"], errors="coerce").dt.to_period("M").dt.to_timestamp()
     df["mes_formatado"] = gerar_rotulo_mes(df["data"])
 
-    # textos
     df["grupo"] = df["grupo"].astype(str).str.strip()
     df["conta"] = df["conta"].astype(str).str.strip()
     df["unidade"] = df["unidade"].astype(str).str.strip()
 
-    # grupos
     df["grupo_padrao"] = df["grupo"].replace(config["mapa_grupos"])
 
-    # valor numérico
     df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
 
-    # sinais
     mask_neg = df["grupo_padrao"].isin(config["grupos_negativos"])
     df.loc[mask_neg, "valor"] = -df.loc[mask_neg, "valor"].abs()
 
@@ -341,7 +338,6 @@ def montar_dre_analitica(dre_mensal, linha_receita_base="Receita Bruta"):
     colunas_meses = [c for c in dre_base.columns if c != "Descrição"]
     dre_analise = dre_base.copy()
 
-    # AV (%)
     for mes in colunas_meses:
         receita_mes = dre_base.loc[dre_base["Descrição"] == linha_receita_base, mes]
         receita_mes = receita_mes.values[0] if len(receita_mes) else None
@@ -352,7 +348,6 @@ def montar_dre_analitica(dre_mensal, linha_receita_base="Receita Bruta"):
         else:
             dre_analise[av_col] = dre_base[mes] / receita_mes * 100
 
-    # AH (%)
     for i in range(1, len(colunas_meses)):
         mes_atual = colunas_meses[i]
         mes_anterior = colunas_meses[i - 1]
@@ -368,7 +363,6 @@ def montar_dre_analitica(dre_mensal, linha_receita_base="Receita Bruta"):
             * 100
         )
 
-    # Reordenação
     nova_ordem = ["Descrição"]
     for mes in colunas_meses:
         nova_ordem.append(mes)
@@ -383,7 +377,6 @@ def montar_dre_analitica(dre_mensal, linha_receita_base="Receita Bruta"):
 
     dre_analise = dre_analise[nova_ordem]
 
-    # Total anual
     dre_base["TOTAL_ANO"] = dre_base[colunas_meses].sum(axis=1)
 
     receita_total_ano = dre_base.loc[
@@ -764,10 +757,10 @@ def render_demonstrativo(dados, titulo="Demonstrativo"):
             fig_contas.update_traces(hovertemplate="R$ %{y:,.2f}")
             st.plotly_chart(fig_contas, use_container_width=True)
 
+
 # =========================================================
 # FUNÇÃO DE DOWNLOADS
 # =========================================================
-
 def render_downloads():
     st.subheader("📥 Central de Arquivos")
     st.caption("Baixe o pacote de arquivos entregues pela Focus.")
@@ -775,7 +768,8 @@ def render_downloads():
     caminho_zip = CONFIG["downloads"]["arquivo_zip"]
 
     if not os.path.exists(caminho_zip):
-        st.warning(f"Arquivo não encontrado: {caminho_zip}")
+        st.info("O arquivo ZIP não está disponível neste ambiente.")
+        st.write("No ambiente online, use esta área apenas se o ZIP estiver hospedado junto ao projeto.")
         return
 
     with open(caminho_zip, "rb") as f:
@@ -786,12 +780,24 @@ def render_downloads():
             mime="application/zip"
         )
 
-   
+
 # =========================================================
-# 11) PROCESSAMENTO PRINCIPAL
+# 10) PROCESSAMENTO PRINCIPAL
 # =========================================================
 try:
-    df_raw = carregar_base(CONFIG)
+    df_raw = carregar_base(
+        arquivo_upload,
+        sheet_name=CONFIG["arquivo"]["sheet_name"]
+    )
+
+    if df_raw is None:
+        if menu == "Downloads":
+            render_downloads()
+            st.stop()
+
+        st.info("Envie a base financeira no menu lateral para iniciar o dashboard.")
+        st.stop()
+
     df = padronizar_colunas(df_raw, CONFIG)
     df = padronizar_dados(df, CONFIG)
 
@@ -835,3 +841,4 @@ elif menu == "Demonstrativo Focus AD":
 
 elif menu == "Downloads":
     render_downloads()
+    
