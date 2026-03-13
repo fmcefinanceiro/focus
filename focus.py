@@ -11,7 +11,6 @@ import streamlit as st
 
 # =========================================================
 # 1) CONFIGURAÇÕES GERAIS DO PROJETO
-#    -> EDITE AQUI quando quiser adaptar para outra empresa
 # =========================================================
 CONFIG = {
     "app": {
@@ -32,6 +31,7 @@ CONFIG = {
     },
 
     "arquivo": {
+        "caminho_base": "data/Base Geral.xlsx",
         "sheet_name": 0
     },
 
@@ -116,14 +116,6 @@ st.markdown(
 )
 
 menu = st.sidebar.radio("Navegação", CONFIG["app"]["menu"])
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📂 Carregar base")
-
-arquivo_upload = st.sidebar.file_uploader(
-    "Envie a base financeira (.xlsx)",
-    type=["xlsx"]
-)
 
 
 # =========================================================
@@ -218,11 +210,16 @@ def criar_zip_da_pasta(pasta_base):
 # 4) LEITURA E PADRONIZAÇÃO DA BASE
 # =========================================================
 @st.cache_data
-def carregar_base(arquivo, sheet_name=0):
-    if arquivo is None:
-        return None
+def carregar_base(config):
+    caminho = config["arquivo"]["caminho_base"]
 
-    df = pd.read_excel(arquivo, sheet_name=sheet_name)
+    if not os.path.exists(caminho):
+        raise FileNotFoundError(f"Arquivo da base não encontrado: {caminho}")
+
+    df = pd.read_excel(
+        caminho,
+        sheet_name=config["arquivo"]["sheet_name"]
+    )
     return df
 
 
@@ -263,7 +260,6 @@ def padronizar_dados(df, config):
     df["unidade"] = df["unidade"].astype(str).str.strip()
 
     df["grupo_padrao"] = df["grupo"].replace(config["mapa_grupos"])
-
     df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
 
     mask_neg = df["grupo_padrao"].isin(config["grupos_negativos"])
@@ -769,7 +765,7 @@ def render_downloads():
 
     if not os.path.exists(caminho_zip):
         st.info("O arquivo ZIP não está disponível neste ambiente.")
-        st.write("No ambiente online, use esta área apenas se o ZIP estiver hospedado junto ao projeto.")
+        st.write("Verifique se o arquivo está na pasta data/.")
         return
 
     with open(caminho_zip, "rb") as f:
@@ -785,19 +781,7 @@ def render_downloads():
 # 10) PROCESSAMENTO PRINCIPAL
 # =========================================================
 try:
-    df_raw = carregar_base(
-        arquivo_upload,
-        sheet_name=CONFIG["arquivo"]["sheet_name"]
-    )
-
-    if df_raw is None:
-        if menu == "Downloads":
-            render_downloads()
-            st.stop()
-
-        st.info("Envie a base financeira no menu lateral para iniciar o dashboard.")
-        st.stop()
-
+    df_raw = carregar_base(CONFIG)
     df = padronizar_colunas(df_raw, CONFIG)
     df = padronizar_dados(df, CONFIG)
 
@@ -841,4 +825,3 @@ elif menu == "Demonstrativo Focus AD":
 
 elif menu == "Downloads":
     render_downloads()
-    
