@@ -1,5 +1,6 @@
+streamlit>=1.55.0
 pandas
 plotly
 requests
-streamlit
 openpyxl
+altair>=5
